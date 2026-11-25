@@ -1,0 +1,50 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest, goos: windows, goarch: amd64, asset: constellation-desktop_windows_amd64.exe, ldx: "-H windowsgui", cgo: "0" }
+          - { os: macos-14,      goos: darwin,  goarch: arm64, asset: constellation-desktop_darwin_arm64.bin,  ldx: "",              cgo: "1" }
+          - { os: macos-13,      goos: darwin,  goarch: amd64, asset: constellation-desktop_darwin_amd64.bin,  ldx: "",              cgo: "1" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.24' }
+      - name: build
+        env: { GOOS: "${{ matrix.goos }}", GOARCH: "${{ matrix.goarch }}", CGO_ENABLED: "${{ matrix.cgo }}" }
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          go vet ./...
+          go build -trimpath -ldflags "${{ matrix.ldx }} -s -w -X main.version=$V" -o "dist/${{ matrix.asset }}" .
+      - name: bundle
+        run: |
+          mkdir -p bundle
+          if [ "${{ matrix.goos }}" = windows ]; then
+            mkdir -p pkg && cp dist/*.exe pkg/MooseNetTray.exe && cp node/windows/* node/linux/* assets/terminus-32.png pkg/
+            (cd pkg && zip -qr ../bundle/constellation-desktop_windows_amd64.zip .)
+          else
+            mkdir -p pkg/mac pkg/linux && cp dist/${{ matrix.asset }} pkg/mac/constellation-desktop && cp node/mac/* pkg/mac/ && cp node/linux/* pkg/linux/
+            (cd pkg && zip -qr ../bundle/constellation-desktop_${{ matrix.goos }}_${{ matrix.goarch }}.zip .)
+          fi
+          cp dist/* bundle/
+      - uses: actions/upload-artifact@v4
+        with: { name: "${{ matrix.asset }}", path: bundle/* }
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
+      - name: checksums + release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          cd out && sha256sum * > SHA256SUMS && cat SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes "Constellation Desktop $GITHUB_REF_NAME. Verify downloads against SHA256SUMS."
