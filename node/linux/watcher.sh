@@ -21,6 +21,7 @@ else
   mountpoint -q /x || mount -t drvfs "$WINX" /x || { echo "FATAL: cannot mount $WINX"; exit 2; }
 fi
 mkdir -p /x/inbox /x/outbox /w/archive
+mount --make-rshared / 2>/dev/null || true   # rootless podman (docker-using gate scripts) needs shared mount propagation
 log() { echo "$(date -u +%FT%TZ) $*" | tee -a /x/outbox/watcher.log; }
 
 # runner may only talk to loopback: jobs are offline (vendored deps). Fail closed if the rule can't be set.

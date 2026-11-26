@@ -62,6 +62,19 @@ if ! runuser -u "$RUNNER" -- "$H/.cargo/bin/rustc" +"$TC" -V >/dev/null 2>&1; th
     --target x86_64-unknown-linux-musl --component rust-src
   rm -f /tmp/rustup-init
 fi
+# repos pin components in rust-toolchain.toml (clippy, rustfmt); the runner has no egress, so install them now
+runuser -u "$RUNNER" -- "$H/.cargo/bin/rustup" component add clippy rustfmt rust-src --toolchain "$TC"
+
+echo "== 5b. rootless podman (docker-compatible CLI) + preloaded pgvector image for docker-using gate scripts"
+# Rootless: the runner gets containers without a root daemon or docker group (it never becomes root-equivalent)
+# and keeps its egress block; the image is pulled by root and loaded into the runner's own store.
+apt-get install -y -q podman podman-docker uidmap slirp4netns passt fuse-overlayfs
+grep -q "^$RUNNER:" /etc/subuid || usermod --add-subuids 200000-265535 --add-subgids 200000-265535 "$RUNNER"
+mkdir -p /etc/containers/registries.conf.d; touch /etc/containers/nodocker
+printf 'unqualified-search-registries = ["docker.io"]\nshort-name-mode = "permissive"\n' > /etc/containers/registries.conf.d/50-moosenet.conf
+mount --make-rshared / || true
+podman pull -q docker.io/pgvector/pgvector:pg16 >/dev/null && podman save -q -o /var/tmp/pgv.tar docker.io/pgvector/pgvector:pg16 && chmod 644 /var/tmp/pgv.tar
+( cd "$H" && runuser -u "$RUNNER" -- env -i HOME="$H" PATH=/usr/local/bin:/usr/bin:/bin podman load -q -i /var/tmp/pgv.tar )
 rm -rf "$H/.cargo/registry" "$H"/.cargo/credentials*
 mkdir -p /w /x && chown "$RUNNER:$RUNNER" /w
 
@@ -74,6 +87,8 @@ check "pg throwaway + vector" "d=\$(runuser -u $RUNNER -- mktemp -d) && runuser 
 check "rustc $TC" "runuser -u $RUNNER -- $H/.cargo/bin/rustc +$TC -V" || fail=1
 check "musl target" "runuser -u $RUNNER -- $H/.cargo/bin/rustup +$TC target list --installed | grep -qx x86_64-unknown-linux-musl" || fail=1
 check "musl-gcc" "test -x /usr/local/bin/musl-gcc" || fail=1
+check "clippy + rustfmt" "runuser -u $RUNNER -- $H/.cargo/bin/rustup component list --installed --toolchain $TC | grep -q clippy" || fail=1
+check "rootless container (pgvector) as $RUNNER" "cd $H && runuser -u $RUNNER -- env -i HOME=$H PATH=/usr/local/bin:/usr/bin:/bin docker run --rm pgvector/pgvector:pg16 postgres --version" || fail=1
 check "node v20.19.2" "/opt/node/bin/node -v | grep -qx v20.19.2" || fail=1
 check "iptables owner match" "iptables -A OUTPUT -m owner --uid-owner $(id -u $RUNNER) -d 192.0.2.1 -j REJECT && iptables -D OUTPUT -m owner --uid-owner $(id -u $RUNNER) -d 192.0.2.1 -j REJECT" || fail=1
 [ $fail = 0 ] || { echo "BOOTSTRAP SELF-CHECK FAILED"; exit 4; }
