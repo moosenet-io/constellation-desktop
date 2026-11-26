@@ -31,6 +31,8 @@ type Platform interface {
 	HasOpsRunner() bool
 	CapChoices() []string
 	SetCaps(c string) string
+	// FullModeChanged is called after the tray flips FULL_MODE; the reconciler applies it when no build runs.
+	FullModeChanged()
 	Status() state
 	Reconcile()
 	GameRunning(names, ignore []string) bool

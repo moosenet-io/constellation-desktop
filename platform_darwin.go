@@ -100,6 +100,9 @@ func (m *macPlatform) Reconcile() {
 			m.stopBuilder("apply caps")
 		}
 		c := strings.SplitN(getSetting("caps", m.CapChoices()[0]).s, "/", 2)
+		if has("FULL_MODE") {
+			c = strings.SplitN(fullCaps(), "/", 2)
+		}
 		if out, err := run(limactl(), "edit", limaVM, "--cpus", c[0], "--memory", c[1]); err != nil {
 			logLine("caps apply failed: " + out)
 		}
@@ -153,6 +156,24 @@ func (m *macPlatform) stopBuilder(why string) {
 }
 
 func (m *macPlatform) readCaps() string { return getSetting("caps", m.CapChoices()[0]).s }
+
+// FullModeChanged: re-apply caps (Full Power or the saved choice) the next time no build runs.
+func (m *macPlatform) FullModeChanged() { touch("APPLY_VMCONFIG") }
+
+// fullCaps: every CPU and all RAM but 6 GB (min 8 GB), as "threads/GB".
+func fullCaps() string {
+	gb := 16
+	if o, err := run("sysctl", "-n", "hw.memsize"); err == nil {
+		if b, err := strconv.ParseInt(strings.TrimSpace(o), 10, 64); err == nil {
+			gb = int(b>>30) - 6
+		}
+	}
+	if gb < 8 {
+		gb = 8
+	}
+	return strconv.Itoa(runtime.NumCPU()) + "/" + strconv.Itoa(gb)
+}
+
 func (m *macPlatform) SetCaps(c string) string {
 	setSetting("caps", c)
 	return "Resources set to " + capLabel(c) + "; applied when no build is running"

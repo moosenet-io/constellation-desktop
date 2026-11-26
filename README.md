@@ -29,7 +29,12 @@ checking for work while busy, so new batches start the moment a slot frees. Over
 
 ## Control files
 The tray, the reconciler and the fleet all use the same switch files in the node's `control` folder:
-`BUILDER_ON`, `TDARR_ON`, `GAME_MODE`, `RUNNER_OFF` (Windows), `APPLY_VMCONFIG`, `CANCEL`.
+`BUILDER_ON`, `TDARR_ON`, `GAME_MODE`, `RUNNER_OFF` (Windows), `APPLY_VMCONFIG`, `CANCEL`, `FULL_MODE`.
+
+## Full Power
+**Full Power while away** in the tray (or the `FULL_MODE` switch file) gives the build VM every CPU thread and all
+RAM but 6 GB. It is applied only when no build is running, and turning it off restores the caps you had before.
+Game Mode still stops everything at once, so the machine is yours the moment you sit down.
 
 ## Building
 `go build .` on the target OS (macOS needs CGO for the menu bar). Releases are built by GitHub Actions on `v*` tags.

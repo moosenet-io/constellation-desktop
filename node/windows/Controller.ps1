@@ -3,6 +3,8 @@
 #   BUILDER_ON  present -> build watcher running (absent -> builder stopped safely)
 #   GAME_MODE   present -> builder stopped safely, whatever BUILDER_ON says (your "I want to play" switch)
 #   APPLY_WSLCONFIG present -> restart WSL to apply new caps, but only when no build job is in progress
+#   FULL_MODE   present -> Full Power: the build VM gets every logical CPU and all RAM but 6 GB (while you're away).
+#                 Removing it restores the caps saved when it was turned on. Both changes apply only when no job runs.
 # Claude flips these files remotely; you flip GAME_MODE with the desktop shortcuts. Log: ops\logs\controller.log
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $C = Join-Path $Root 'ops\control'; $Log = Join-Path $Root 'ops\logs\controller.log'
@@ -42,6 +44,29 @@ function Stop-Builder($why) {
   Say "builder stopped ($why)"
 }
 if (-not $want -and $running) { Stop-Builder ($(if (Test-Path (Join-Path $C 'GAME_MODE')) {'GAME_MODE'} else {'BUILDER_ON absent'})) ; $running = $false }
+# ---- Full Power (FULL_MODE)
+$cfg = Join-Path $env:USERPROFILE '.wslconfig'; $saved = Join-Path $C 'wslconfig.normal'
+$cur = if (Test-Path $cfg) { (Get-Content $cfg -Raw) -replace "`r",'' } else { '' }
+if (Test-Path (Join-Path $C 'FULL_MODE')) {
+  $cs = Get-CimInstance Win32_ComputerSystem
+  $cpu = $cs.NumberOfLogicalProcessors
+  $gb = [math]::Max(8, [int][math]::Floor($cs.TotalPhysicalMemory / 1GB) - 6)
+  $full = "[wsl2]`nprocessors=$cpu`nmemory=${gb}GB`nswap=8GB`n"
+  if ($cur -ne $full) {
+    if (-not (Test-Path $saved)) { [IO.File]::WriteAllText($saved, $cur) }
+    [IO.File]::WriteAllText($cfg, ($full -replace "`n","`r`n"))
+    New-Item -ItemType File -Force (Join-Path $C 'APPLY_WSLCONFIG') | Out-Null
+    Say "full power on: .wslconfig -> $cpu threads / ${gb} GB (applies when no job runs)"
+  }
+} elseif (Test-Path $saved) {
+  $norm = ([IO.File]::ReadAllText($saved)) -replace "`r",''
+  if ($cur -ne $norm) {
+    if ($norm) { [IO.File]::WriteAllText($cfg, ($norm -replace "`n","`r`n")) } else { Remove-Item $cfg -ErrorAction SilentlyContinue }
+    New-Item -ItemType File -Force (Join-Path $C 'APPLY_WSLCONFIG') | Out-Null
+    Say 'full power off: normal caps restored (applies when no job runs)'
+  }
+  Remove-Item $saved
+}
 if (Test-Path (Join-Path $C 'APPLY_VMCONFIG')) { Move-Item (Join-Path $C 'APPLY_VMCONFIG') (Join-Path $C 'APPLY_WSLCONFIG') -Force }
 if ((Test-Path (Join-Path $C 'APPLY_WSLCONFIG')) -and -not $jobBusy) {
   if ($running) { Stop-Builder 'apply wslconfig' }
@@ -64,6 +89,6 @@ if ($wantTd -and -not $td -and (Test-Path $tdExe)) {
   Say 'tdarr node started'
 }
 if (-not $wantTd -and $td) {
-  & taskkill /T /F /IM Tdarr_Node.exe | Out-Null; Get-Process -Name 'ffmpeg','HandBrakeCLI' -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Root*" } | Stop-Process -Force
+  & taskkill /T /F /IM Tdarr_Node.exe | Out-Null; & taskkill /F /IM Tdarr_Node_Runtime.exe 2>$null | Out-Null; Get-Process -Name 'ffmpeg','HandBrakeCLI' -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Root*" } | Stop-Process -Force
   Say "tdarr node stopped ($(if (Test-Path (Join-Path $C 'GAME_MODE')) {'GAME_MODE'} else {'TDARR_ON absent'}))"
 }

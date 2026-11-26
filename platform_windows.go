@@ -89,8 +89,19 @@ func (w *winPlatform) readCaps() string {
 	}
 	return t + "/" + g
 }
+
+// FullModeChanged: Controller.ps1 owns FULL_MODE (writes .wslconfig, saves/restores the normal caps); nudge it now.
+func (w *winPlatform) FullModeChanged() { go w.Reconcile() }
+
 func (w *winPlatform) SetCaps(c string) string {
 	parts := strings.SplitN(c, "/", 2)
+	if has("FULL_MODE") { // remember the choice as the normal caps; Full Power keeps the VM at max until it is turned off
+		body := fmt.Sprintf("[wsl2]\nprocessors=%s\nmemory=%sGB\nswap=8GB\n", parts[0], parts[1])
+		if err := os.WriteFile(ctl("wslconfig.normal"), []byte(body), 0o644); err != nil {
+			return "Could not save caps: " + err.Error()
+		}
+		return "Saved " + capLabel(c) + " for when Full Power is turned off"
+	}
 	if b, err := os.ReadFile(w.wslconfig()); err == nil {
 		_ = os.WriteFile(w.wslconfig()+".bak", b, 0o644)
 	}

@@ -6,6 +6,7 @@
 //	BUILDER_ON   build watcher should run          GAME_MODE   stop builds + transcodes now
 //	TDARR_ON     Tdarr node should run             RUNNER_OFF  Claude ops runner stopped (Windows)
 //	APPLY_VMCONFIG  apply new CPU/RAM caps when idle  CANCEL      cancel the running ops script
+//	FULL_MODE    Full Power: every CPU thread and all RAM but 6 GB for the build VM (applied when idle)
 //
 // Claude/Chord flip the same files remotely, so the tray, the operator and the fleet never disagree.
 package main
@@ -35,6 +36,7 @@ var (
 	mGame    *systray.MenuItem
 	mAuto    *systray.MenuItem
 	mBuild   *systray.MenuItem
+	mFull    *systray.MenuItem
 	mTdarr   *systray.MenuItem
 	mRunner  *systray.MenuItem
 	mCaps    = map[string]*systray.MenuItem{}
@@ -64,6 +66,7 @@ func onReady() {
 	mGame = systray.AddMenuItemCheckbox("Game Mode (pause builds + transcodes)", "", false)
 	mAuto = systray.AddMenuItemCheckbox("Auto Game Mode when a game is running", "", true)
 	mBuild = systray.AddMenuItemCheckbox("Builder enabled", "", false)
+	mFull = systray.AddMenuItemCheckbox("Full Power while away (all CPU + RAM)", "", false)
 	mTdarr = systray.AddMenuItemCheckbox("Tdarr transcoding enabled", "", false)
 	if p.HasOpsRunner() {
 		mRunner = systray.AddMenuItemCheckbox("Claude ops runner enabled", "", true)
@@ -104,6 +107,14 @@ func onReady() {
 				setSetting("auto_game", boolStr(!getSetting("auto_game", "1").is1()))
 			case <-mBuild.ClickedCh:
 				toggle("BUILDER_ON")
+			case <-mFull.ClickedCh:
+				toggle("FULL_MODE")
+				p.FullModeChanged()
+				if has("FULL_MODE") {
+					notify("Full Power on: the build VM gets all CPU and RAM once no build is running")
+				} else {
+					notify("Full Power off: normal caps return once no build is running")
+				}
 			case <-mTdarr.ClickedCh:
 				toggle("TDARR_ON")
 			case <-runnerCh():
@@ -217,6 +228,9 @@ func refresh() {
 	case s.Builder || s.Tdarr:
 		st, label = "starting", "Starting..."
 	}
+	if has("FULL_MODE") && !s.Game {
+		label += " (Full Power)"
+	}
 	mStatus.SetTitle("Status: " + label)
 	job := s.Job
 	if job == "" {
@@ -230,6 +244,7 @@ func refresh() {
 	check(mGame, s.Game)
 	check(mAuto, getSetting("auto_game", "1").is1())
 	check(mBuild, s.Builder)
+	check(mFull, has("FULL_MODE"))
 	check(mTdarr, s.Tdarr)
 	if mRunner != nil {
 		check(mRunner, !s.RunnerOff)
