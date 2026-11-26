@@ -21,6 +21,12 @@ node, and one-click **Game Mode** so the machine is yours the moment you want it
 - **macOS**: download the zip for your Mac, unzip, run `bash mac/install.sh mac/constellation-desktop`.
   The app is not notarized yet: the first launch may need right-click > Open.
 
+## Concurrent builds (watcher v3)
+The build worker runs up to `SLOTS` batches at once (default 3), each in its own work area with `JOBS_PER_SLOT`
+cargo jobs (default: VM cores / SLOTS), so parallel batches share the CPU instead of fighting over it. It keeps
+checking for work while busy, so new batches start the moment a slot frees. Override either value in
+`/etc/moosenet-target5.conf` inside the build VM. Game Mode and the builder switch still stop every slot at once.
+
 ## Control files
 The tray, the reconciler and the fleet all use the same switch files in the node's `control` folder:
 `BUILDER_ON`, `TDARR_ON`, `GAME_MODE`, `RUNNER_OFF` (Windows), `APPLY_VMCONFIG`, `CANCEL`.
