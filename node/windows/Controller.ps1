@@ -81,7 +81,15 @@ if ($want -and -not $watcher) {
 
 # ---- Tdarr node (TDARR_ON, paused by GAME_MODE). Lowest priority: runs BelowNormal so games/builds win.
 $tdExe = Join-Path $Root 'tdarr\Tdarr_Node\Tdarr_Node.exe'
-$wantTd = (Test-Path (Join-Path $C 'TDARR_ON')) -and -not (Test-Path (Join-Path $C 'GAME_MODE'))
+# Tdarr only while the builder is idle (operator 2026-11-26 22:09 PT: "When dork slayer is not busy use it for tdarr"):
+# busy = a drop job is taken OR builder-owned cargo/rustc runs in WSL (LAN door jobs). Start after 10 idle minutes;
+# any new build stops Tdarr at once (Tdarr re-queues the file).
+$buildBusy = $jobBusy
+if (-not $buildBusy -and $running) { $n = (wsl -d $Distro -u root -- sh -c "pgrep -c -u builder -f 'cargo|rustc' || true") -replace "`0",''; $buildBusy = ([int]($n | Select-Object -First 1)) -gt 0 }
+$busyMark = Join-Path $C '.last-build-busy'
+if ($buildBusy) { Set-Content $busyMark (Get-Date -Format o) }
+$buildIdle = (-not $buildBusy) -and ((-not (Test-Path $busyMark)) -or (((Get-Date) - (Get-Item $busyMark).LastWriteTime).TotalMinutes -ge 10))
+$wantTd = (Test-Path (Join-Path $C 'TDARR_ON')) -and -not (Test-Path (Join-Path $C 'GAME_MODE')) -and $buildIdle
 $td = Get-Process Tdarr_Node -ErrorAction SilentlyContinue
 if ($wantTd -and -not $td -and (Test-Path $tdExe)) {
   $p = Start-Process $tdExe -WorkingDirectory (Split-Path $tdExe) -WindowStyle Hidden -PassThru
@@ -90,5 +98,5 @@ if ($wantTd -and -not $td -and (Test-Path $tdExe)) {
 }
 if (-not $wantTd -and $td) {
   & taskkill /T /F /IM Tdarr_Node.exe | Out-Null; & taskkill /F /IM Tdarr_Node_Runtime.exe 2>$null | Out-Null; Get-Process -Name 'ffmpeg','HandBrakeCLI' -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Root*" } | Stop-Process -Force
-  Say "tdarr node stopped ($(if (Test-Path (Join-Path $C 'GAME_MODE')) {'GAME_MODE'} else {'TDARR_ON absent'}))"
+  Say "tdarr node stopped ($(if (Test-Path (Join-Path $C 'GAME_MODE')) {'GAME_MODE'} elseif (-not $buildIdle) {'builder busy'} else {'TDARR_ON absent'}))"
 }
